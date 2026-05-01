@@ -1,0 +1,258 @@
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{xcolor}
+
+\graphicspath{{figures/}}
+
+\newcommand{\placeholder}[1]{%
+  \par\noindent\textcolor{gray}{\fbox{\begin{minipage}{0.96\linewidth}
+  \textbf{Placeholder:} #1
+  \end{minipage}}}\par\vspace{0.75em}
+}
+\newcommand{\question}[1]{\subsection*{#1}}
+\newcommand{\subquestion}[1]{\subsubsection*{#1}}
+\newcommand{\figureplaceholder}[1]{%
+  \fbox{\begin{minipage}[c][2.2in][c]{0.9\linewidth}
+  \centering #1
+  \end{minipage}}
+}
+
+\title{CS336 Assignment 2: Systems and Parallelism}
+\author{Lenard Strahringer}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\section*{2 Profiling and Benchmarking}
+
+\question{Problem: Benchmarking Script}
+\subquestion{(a) Benchmarking script implementation}
+\placeholder{State implementation status for the benchmarking script that measures forward-only, forward-plus-backward, and full training steps.}
+
+\subquestion{(b) Model-size timing results}
+\begin{table}[H]
+  \centering
+  \input{tables/benchmarking_script_results_1.tex}
+  \caption{Mean and standard deviation of forward, backward, and optimizer-step timings in seconds on a Modal B200, using batch size 4, context length 256, 5 warm-up steps, 10 measurement steps, and bfloat16 weights.}
+\end{table}
+
+The forward pass ranges from 0.0113s for the small model to 0.0438s for the 10B model. The backward pass ranges from 0.0173s to 0.1351s, and is consistently more expensive than the forward pass. The standard deviations are small relative to the means for the forward pass, while the largest models show somewhat more variability for backward and optimizer-step timing.
+
+\subquestion{(c) Warm-up ablation}
+\placeholder{Compare timings with zero warm-up steps and with 1--2 warm-up steps. Explain in 2--3 sentences why results differ from the 5-warm-up setting.}
+
+\question{Problem: Nsight Systems Profiling}
+\subquestion{(a) Forward-pass time}
+\placeholder{For each profiled model-size/context-length combination, report total forward-pass time and compare against Python timing.}
+
+\subquestion{(b) Dominant CUDA kernel}
+\placeholder{Identify the CUDA kernel with the largest cumulative GPU time in the forward pass, its invocation count per forward pass, and whether it also dominates forward-plus-backward.}
+
+\subquestion{(c) Non-matmul kernels}
+\placeholder{List non-matrix-multiply kernels with non-trivial forward-pass runtime and briefly comment on where they arise.}
+
+\subquestion{(d) Full training-step profile}
+\placeholder{Compare the fraction of time spent in matrix multiplication and other kernels for inference versus a full training step.}
+
+\subquestion{(e) Attention softmax versus matmul}
+\placeholder{Compare softmax runtime against attention matrix-multiply runtimes and relate the difference to the FLOP counts.}
+
+\question{Problem: Mixed-Precision Accumulation}
+\placeholder{Comment in 2--3 sentences on the accuracy of the four accumulation experiments.}
+
+\question{Problem: Benchmarking Mixed Precision}
+\subquestion{(a) Autocast dtypes in ToyModel}
+\placeholder{List the dtype of model parameters, fc1 output, layer norm output, logits, loss, and gradients under FP16 autocast.}
+
+\subquestion{(b) Layer normalization and mixed precision}
+\placeholder{Explain in 2--3 sentences which layer-normalization computations are precision-sensitive and whether BF16 changes the concern.}
+
+\subquestion{(c) Transformer mixed-precision benchmarking}
+\placeholder{Report timings with and without BF16 mixed precision for each model size and summarize trends in 2--3 sentences.}
+
+\question{Problem: Memory Profiling}
+\subquestion{(a) Active memory timelines}
+\placeholder{Include two memory-viz active memory timeline figures for the xl model: forward-only and full training step. Add a 2--3 sentence description of the observed peaks.}
+
+\begin{figure}[H]
+  \centering
+  \figureplaceholder{Insert forward-pass memory timeline image here.}
+  \caption{Placeholder: xl forward-pass active memory timeline.}
+\end{figure}
+
+\begin{figure}[H]
+  \centering
+  \figureplaceholder{Insert full-training-step memory timeline image here.}
+  \caption{Placeholder: xl full-training-step active memory timeline.}
+\end{figure}
+
+\subquestion{(b) Peak memory by context length}
+\placeholder{Insert a table with peak memory for context lengths 128 and 2048, split by forward pass and full training step.}
+
+\subquestion{(c) Mixed-precision peak memory}
+\placeholder{Report peak memory for mixed precision, for both forward-only and full training-step profiles, and comment in 2--3 sentences.}
+
+\subquestion{(d) Residual-stream activation size}
+\placeholder{Give a 1--2 sentence derivation of the single-precision residual-stream activation tensor size for the xl model.}
+
+\subquestion{(e) Largest allocations in memory-viz}
+\placeholder{Identify the largest allocations visible after reducing memory-viz detail and state where their stack traces point.}
+
+\subquestion{(f) Nsight memory profiling}
+\placeholder{Include Nsight screenshots, list the five largest saved-for-backward contributors in a TransformerBlock, and provide a 1--2 paragraph memory accounting response.}
+
+\section*{3 Single-GPU Memory}
+
+\question{Problem: Memory-Optimal Gradient Checkpointing}
+\subquestion{(a) Optimal strategy ignoring compute}
+\placeholder{Describe the checkpointing strategy in 3--5 sentences, including asymptotic peak activation memory and compute. Add the requested short code-sketch placeholder.}
+
+\subquestion{(b) One-step recomputation budget}
+\placeholder{For the xl model at batch size 4 and sequence length 2048, describe the best non-nested checkpointing strategy, report measured peak memory, and compare neighboring block sizes.}
+
+\section*{4 GPU Kernels}
+
+\question{Problem: PyTorch Attention Benchmarking}
+\subquestion{(a) Attention scaling benchmark}
+\placeholder{Insert a table of forward/backward timings or OOMs over the requested sequence lengths and head dimensions. Include memory calculations for a small OOM configuration and a 1--2 paragraph discussion.}
+
+\question{Problem: Torch Compile}
+\subquestion{(a) Compiled attention benchmark}
+\placeholder{Insert a table comparing compiled versus uncompiled attention forward and backward timings.}
+
+\subquestion{(b) Compiled Transformer benchmark}
+\placeholder{Insert a table comparing vanilla and compiled Transformer timing for forward, forward-plus-backward, and full training steps.}
+
+\question{Problem: FlashAttention-2 Forward Pass}
+\subquestion{(a) PyTorch FlashAttention-2 forward}
+\placeholder{State implementation status and test result for the pure PyTorch autograd.Function forward pass.}
+
+\subquestion{(b) Triton FlashAttention-2 forward}
+\placeholder{State implementation status and test result for the Triton forward kernel.}
+
+\subquestion{(c) Causal masking}
+\placeholder{State implementation status and test result for the optional causal masking flag.}
+
+\question{Problem: FlashAttention-2 Backward Pass}
+\placeholder{State implementation status and test result for the PyTorch/torch.compile backward pass.}
+
+\question{Problem: FlashAttention-2 Benchmarking}
+\subquestion{(a) Triton versus PyTorch attention}
+\placeholder{Insert a table comparing Triton FlashAttention-2 and regular PyTorch attention for forward, backward, and end-to-end latencies across sequence length, embedding dimension, and precision.}
+
+\section*{5 Distributed Data Parallel Training}
+
+\question{Problem: Distributed Communication (Single Node)}
+\placeholder{Insert plot(s) and/or table(s) comparing all-reduce runtime across tensor sizes and GPU counts, with 2--3 sentences of commentary.}
+
+\question{Problem: Naive DDP}
+\placeholder{State implementation status and test result for the naive DDP deliverable.}
+
+\question{Problem: Naive DDP Benchmarking}
+\placeholder{Describe the benchmarking setup and report total time per training iteration plus time spent communicating gradients for the xl model on 1 node x 2 GPUs.}
+
+\question{Problem: Minimal DDP with Flat Gradients Benchmarking}
+\placeholder{Report iteration time and gradient-communication time for the flattened-gradient all-reduce. Compare batching versus individual gradient communication in 1--2 sentences.}
+
+\question{Problem: DDP with Overlapping Individual Parameters}
+\placeholder{State implementation status and test result for the DDP class with overlapping gradient communication.}
+
+\question{Problem: DDP Overlapping Individual Parameters Benchmarking}
+\subquestion{(a) Runtime comparison}
+\placeholder{Report iteration time for overlapping individual-parameter communication and compare against naive and flattened-gradient DDP.}
+
+\subquestion{(b) Nsight comparison}
+\placeholder{Include two Nsight screenshots showing the initial DDP implementation and the overlapped implementation, with a brief visual comparison.}
+
+\section*{6 Optimizer State Sharding}
+
+\question{Problem: Optimizer State Sharding}
+\placeholder{State implementation status and test result for the sharded optimizer.}
+
+\question{Problem: Optimizer State Sharding Accounting}
+\subquestion{(a) Peak memory accounting}
+\placeholder{Report peak memory after model initialization, before optimizer step, and after optimizer step, with and without sharding. Break down memory by parameters, optimizer states, gradients, and other components.}
+
+\subquestion{(b) Training speed}
+\placeholder{Report per-iteration timings with and without optimizer state sharding for the standard 1 node x 2 GPU xl setup.}
+
+\subquestion{(c) Comparison with ZeRO stage 1}
+\placeholder{Summarize in 2--3 sentences how this optimizer state sharding differs from ZeRO stage 1, especially in memory and communication volume.}
+
+\section*{7 Fully-Sharded Data Parallel}
+
+\question{Problem: Fully-Sharded Data Parallel}
+\placeholder{State implementation status and test result for the FSDP container.}
+
+\question{Problem: FSDP Accounting}
+\subquestion{(a) Expected peak-memory savings}
+\placeholder{Use the Section 6 accounting to estimate peak-memory savings from FSDP, ignoring preallocated all-gather buffers.}
+
+\subquestion{(b) Weight all-gather profiling}
+\placeholder{Profile the xl model on two GPUs, report whether all-gather finishes in time for the forward pass, and include Nsight screenshots.}
+
+\section*{8 Analyzing Parallelism Strategies}
+
+\question{Problem: Alternate Ring All-Reduce}
+\placeholder{Give the runtime in terms of $S$, $N$, and $W$, with a one-sentence justification.}
+
+\question{Problem: Data Parallel Calculations}
+\subquestion{(a) Backward-pass FLOPs}
+\placeholder{Give the backward-pass FLOP count in terms of $B$, $D$, $D_{\mathrm{FF}}$, and $N_{\mathrm{DP}}$, with a one-sentence justification.}
+
+\subquestion{(b) Backward-pass communication time}
+\placeholder{Give the communication time in terms of the relevant variables and justify it in one sentence.}
+
+\subquestion{(c) Communication bottleneck threshold}
+\placeholder{Give an inequality with $N_{\mathrm{DP}}$ on one side and justify the bottleneck condition in one sentence.}
+
+\question{Problem: Fully Sharded Data Parallel Calculations}
+\subquestion{(a) Backward and forward FLOPs}
+\placeholder{Give forward- and backward-pass FLOP counts for FSDP, each with a one-sentence justification.}
+
+\subquestion{(b) Backward and forward communication time}
+\placeholder{Give forward- and backward-pass communication times for FSDP, each with a one-sentence justification.}
+
+\subquestion{(c) Communication bottleneck thresholds}
+\placeholder{Give separate inequalities for backward and forward bottleneck thresholds, each with a one-sentence justification.}
+
+\question{Problem: Tensor Parallel Calculations}
+\subquestion{(a) Backward-pass equations}
+\placeholder{Write the tensor-parallel backward-pass equations that produce each device's weight gradients and $d x$.}
+
+\subquestion{(b) Forward and backward FLOPs}
+\placeholder{Give forward- and backward-pass FLOP counts for TP, each with a one-sentence justification.}
+
+\subquestion{(c) Forward and backward communication time}
+\placeholder{Give forward- and backward-pass communication times for TP, each with a one-sentence justification.}
+
+\subquestion{(d) Communication bottleneck thresholds}
+\placeholder{Give separate inequalities for backward and forward bottleneck thresholds, each with a one-sentence justification.}
+
+\question{Problem: 2D Parallelism Calculations}
+\subquestion{(a) Forward-pass FLOPs}
+\placeholder{Give the forward-pass FLOP count for $N_{\mathrm{FSDP}}$ FSDP by $N_{\mathrm{TP}}$ TP, with a one-sentence justification.}
+
+\subquestion{(b) Forward-pass communication time with overlap}
+\placeholder{Give the max of the FSDP-axis and TP-axis communication costs, with a one-sentence justification.}
+
+\subquestion{(c) Optimal device count with overlapped collectives}
+\placeholder{Give the optimal inequality for $N = N_{\mathrm{TP}}N_{\mathrm{FSDP}}$, with supporting equations and a short justification.}
+
+\subquestion{(d) Optimal device count without overlapped collectives}
+\placeholder{Give the optimal inequality for $N = N_{\mathrm{TP}}N_{\mathrm{FSDP}}$ when the two axes share network resources, with supporting equations and a short justification.}
+
+\section*{9 Leaderboard}
+
+\question{Problem: Leaderboard}
+\placeholder{Report the best wall-clock time for a full forward-and-backward training step with AdamW, along with any brief notes required for reproducibility.}
+
+\end{document}
