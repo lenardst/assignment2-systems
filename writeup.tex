@@ -51,19 +51,37 @@ The forward pass ranges from 0.0113s for the small model to 0.0438s for the 10B 
 
 \question{Problem: Nsight Systems Profiling}
 \subquestion{(a) Forward-pass time}
-\placeholder{For each profiled model-size/context-length combination, report total forward-pass time and compare against Python timing.}
+\begin{table}[H]
+  \centering
+  \input{tables/nsys_profile_context_fit_summary.tex}
+  \caption{Largest power-of-two context lengths that fit in memory for the profiled FP32 full-training-step workload at batch size 4 on a Modal B200.}
+\end{table}
+
+\begin{table}[H]
+  \centering
+  \input{tables/nsys_profile_forward_summary.tex}
+  \caption{Forward-pass time from Nsight Systems CUDA GPU kernel summaries compared with the Python standard-library timing benchmark.}
+\end{table}
+
+The Nsight forward-pass GPU kernel time agrees reasonably well with the Python benchmark: for example, the small model at context 4096 is 256.6ms in Nsight versus 294.9ms from Python, and the medium model at context 2048 is 252.9ms versus 274.0ms. The Python timing is slightly larger because it includes CPU launch overhead and synchronization around the whole step, while the Nsight value shown here is cumulative GPU kernel time inside the captured forward pass.
 
 \subquestion{(b) Dominant CUDA kernel}
-\placeholder{Identify the CUDA kernel with the largest cumulative GPU time in the forward pass, its invocation count per forward pass, and whether it also dominates forward-plus-backward.}
+\begin{table}[H]
+  \centering
+  \resizebox{\textwidth}{!}{\input{tables/nsys_profile_kernel_summary.tex}}
+  \caption{Dominant forward-pass kernel family and aggregate kernel fractions from Nsight Systems. ``FBO'' denotes the full forward, backward, and optimizer-step profile.}
+\end{table}
+
+The dominant cumulative forward-pass CUDA kernel is a CUTLASS FP32 SGEMM kernel in every profiled configuration, with the top kernel invoked between 24 and 97 times depending on model size and context length. It is also the main family in the forward-plus-backward profiles for most settings, though at the small model with context 4096 a PyTorch elementwise kernel becomes the single largest cumulative kernel in the full training-step profile.
 
 \subquestion{(c) Non-matmul kernels}
-\placeholder{List non-matrix-multiply kernels with non-trivial forward-pass runtime and briefly comment on where they arise.}
+Besides matrix multiplies, the main non-trivial forward kernels are softmax-related reductions and elementwise kernels: max reductions, exponentials, sum reductions, residual and normalization elementwise operations, SwiGLU sigmoid/elementwise kernels, and batched copy/cat kernels. These become more visible at longer context lengths because attention softmax is memory- and reduction-heavy even though it has far fewer FLOPs than the dense matrix multiplications.
 
 \subquestion{(d) Full training-step profile}
-\placeholder{Compare the fraction of time spent in matrix multiplication and other kernels for inference versus a full training step.}
+The matrix-multiplication fraction drops when moving from inference to a full training step: for example, small context 256 goes from 78.2\% to 64.7\%, medium context 256 goes from 81.0\% to 68.3\%, and medium context 2048 goes from 62.8\% to 61.2\%. Elementwise kernels become much more important in the full step, reaching 28--36\% in most configurations and 47.7\% for the small model at context 4096, largely due to backward and AdamW update work.
 
 \subquestion{(e) Attention softmax versus matmul}
-\placeholder{Compare softmax runtime against attention matrix-multiply runtimes and relate the difference to the FLOP counts.}
+Softmax-related kernels are much cheaper than the matrix multiplies, but not by the same margin suggested by FLOP counts: for the small model at context 4096, matmul kernels account for 49.8\% of forward GPU time while softmax-ish kernels account for 10.1\%, and for the medium model at context 2048 the split is 62.8\% versus 7.1\%. The softmax runtime is relatively high for its FLOP count because it is dominated by memory traffic, reductions, and exponentials rather than dense compute.
 
 \question{Problem: Mixed-Precision Accumulation}
 \placeholder{Comment in 2--3 sentences on the accuracy of the four accumulation experiments.}
