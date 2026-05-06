@@ -369,7 +369,7 @@ Profiler script: \texttt{modal run sharded\_optimizer\_benchmark\_modal.py}.
 After model initialization, peak is $\approx 12{,}997$\,MiB for both settings, dominated by FP32 weights ($\approx 12{,}996$\,MiB by tensor-count). Immediately before the optimizer step, the run peaks at $\approx 84{,}326$\,MiB baseline versus $\approx 71{,}331$\,MiB sharded. Activations and gradients from the XL backward dwarf static tensors, but only having half og the Adam state per rank removes roughly one full parameter tensor worth of memory traffic ($\approx 13$\,GiB) from the hot path, matching $(1{-}1/N)$ scaling of optimizer tensors at $N{=}2$. Optimizer-state tensors: baseline $\approx 25{,}992$\,MiB ($\approx 2\times$ weights, FP32 \texttt{exp\_avg}/\texttt{exp\_avg\_sq}); sharded $\approx 12{,}996$\,MiB per rank on average ($\approx 1\times$ weights). Gradients at snapshot are $\approx 12{,}996$\,MiB in both cases. Peak does not rise further after \texttt{step} in this configuration.
 
 \subquestion{(b) Training speed}
-Mean iteration latency is $\approx 342.9$\,ms without sharding versus $\approx 343.4$\,ms with sharding ($\lesssim 0.2\%$ slower). One broadcast per parameter after each step roughly compensates for the cheaper optimizer update. Both configurations have the same XL compute maximumm.
+Mean iteration latency is $\approx 342.9$\,ms without sharding versus $\approx 343.4$\,ms with sharding ($\lesssim 0.2\%$ slower). One broadcast per parameter after each step roughly compensates for the cheaper optimizer update. Both configurations have the same XL compute maximum.
 
 \subquestion{(c) Comparison with ZeRO stage 1}
 ZeRO Stage 1 reduces memory by sharding the optimizer state across data-parallel ranks. While a production system partitions gradients and parameters using \texttt{reduce-scatter} and \texttt{all-gather} to overlap communication, this prototype maintains full parameters and gradients on every rank. Synchronization is performed via a dense \texttt{broadcast} after each step, meaning the communication bandwidth scales with the full parameter count $P$. Although memory is saved by sharding the optimizer state, the network cost remains proportional to the total model size because the full tensors are moved during synchronization.
@@ -403,11 +403,9 @@ Nsight timelines were captured for the \emph{xl} model wrapped in course FSDP on
   \label{fig:fsdp-nsys-deep}
 \end{figure}
 
-Early layers (Figure~\ref{fig:fsdp-nsys-early}) match the intended ``gather completes, then matmul'' ordering enforced for numerical stability. Deeper layers (Figure~\ref{fig:fsdp-nsys-deep}) illustrate overlap: NCCL \texttt{all\_gather} segments run concurrently with unrelated kernels from upstream work, so weight collection is often hidden until the consumer layer is ready.
+Early layers (Figure~\ref{fig:fsdp-nsys-early}) have the gather complete and then then matmul enforced for numerical stability. Deeper layers (Figure~\ref{fig:fsdp-nsys-deep}) show overlap: NCCL \texttt{all\_gather} segments run concurrently with unrelated kernels from upstream work, so weight collection is often hidden until the consumer layer is ready.
 
 \section*{8 Analyzing Parallelism Strategies}
-
-\noindent Symbolic checks and numeric spot runs: \texttt{uv run python -m cs336\_systems.parallelism.run\_section8} (sources under \texttt{cs336\_systems/parallelism/}).
 
 \question{Problem: Alternate Ring All-Reduce}
 Each of the $N-1$ rounds transmits one full tensor of $S$ bytes from every device, and egress is bounded by $W$, so the time is $T=(N-1)S/W$. This is larger by about a factor of $N/2$ than ring reduce-scatter followed by ring all-gather, which only moves $S/N$-sized chunks per step.
@@ -509,7 +507,7 @@ When both axes contend for the same links, $T_{\mathrm{comm}}^{\mathrm{fwd}} = T
 \[
   N \;\lesssim\; \frac{3\,B\,D_{\mathrm{FF}}\,W^{2}}{8\,C^{2}}\,
 \]
-about four times smaller than the overlapped case. Discrete searches with exact ring prefactors are in \texttt{problem\_85\_fsdp\_tensor\_parallel.py}.
+about four times smaller than the overlapped case.
 
 \section*{9 Leaderboard}
 
