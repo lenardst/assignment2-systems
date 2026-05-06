@@ -407,42 +407,53 @@ Early layers (Figure~\ref{fig:fsdp-nsys-early}) have the gather complete and the
 
 \section*{8 Analyzing Parallelism Strategies}
 
-\noindent Notation: $F = 6BDD_{\mathrm{FF}}$ (single-device forward MLP FLOPs); backward $= 2F$. Each weight matrix is $DD_{\mathrm{FF}}$ FP16 elements ($2DD_{\mathrm{FF}}$ bytes). Ring costs per $S$-byte tensor: all-reduce $= 2(N{-}1)S/(NW)$; all-gather and reduce-scatter $= (N{-}1)S/(NW)$.
+\noindent The MLP block has three weight matrices ($W_1, W_2, W_3$, each shape $D \times D_{\mathrm{FF}}$). One forward pass through it costs $F = 6BDD_{\mathrm{FF}}$ FLOPs (three matmuls $\times$ $2BDD_{\mathrm{FF}}$ each); the backward costs $2F$ because each matmul yields both an input gradient and a weight gradient. Each weight matrix is $DD_{\mathrm{FF}}$ FP16 elements, i.e.\ $2DD_{\mathrm{FF}}$ bytes. For ring collectives on an $S$-byte tensor across $N$ devices: all-reduce takes $2(N{-}1)S/(NW)$ (one reduce-scatter plus one all-gather, hence the factor of 2); all-gather and reduce-scatter each take half that, $(N{-}1)S/(NW)$.
 
 \question{Problem: Alternate Ring All-Reduce}
-$N{-}1$ rounds, each sending one full $S$-byte tensor per device:
-\[ T = (N-1)S/W, \]
-about $N/2$ times the cost of ring reduce-scatter then all-gather (which moves $S/N$-sized chunks).
+The naive scheme runs $N{-}1$ rounds, and in each round every device sends the \emph{full} $S$-byte tensor:
+\[ T = (N-1)S/W. \]
+The proper ring all-reduce moves only $S/N$-sized chunks per round, so it is roughly $N/2$ times faster --- the savings come from spreading the payload across all devices instead of broadcasting it whole.
 
 \question{Problem: Data Parallel Calculations}
+Each of $N_{\mathrm{DP}}$ devices holds a full copy of the weights and processes $B/N_{\mathrm{DP}}$ samples.
+
 \subquestion{(a) Backward FLOPs}
+Per-device batch is shrunk by $N_{\mathrm{DP}}$, so per-device backward work shrinks proportionally:
 \[ \mathrm{FLOPs}_{\mathrm{bwd}} = \frac{2F}{N_{\mathrm{DP}}} = \frac{12BDD_{\mathrm{FF}}}{N_{\mathrm{DP}}}. \]
 
 \subquestion{(b) Backward communication time}
-Three weight-gradient all-reduces of $2DD_{\mathrm{FF}}$ bytes each:
+After backward, the three weight gradients (same shape as the weights, $2DD_{\mathrm{FF}}$ bytes each) get all-reduced so every device ends with the global gradient:
 \[ T_{\mathrm{comm}} = 3 \cdot \frac{2(N_{\mathrm{DP}}{-}1)}{N_{\mathrm{DP}}} \cdot \frac{2DD_{\mathrm{FF}}}{W} = \frac{12(N_{\mathrm{DP}}{-}1)DD_{\mathrm{FF}}}{N_{\mathrm{DP}} W}. \]
+Note that the payload size is fixed by the model, not the batch.
 
 \subquestion{(c) Bottleneck threshold}
-Set $T_{\mathrm{comm}} = T_{\mathrm{comp}} = 12BDD_{\mathrm{FF}}/(N_{\mathrm{DP}} C)$ and cancel:
-\[ \frac{N_{\mathrm{DP}}-1}{W} = \frac{B}{C} \implies N_{\mathrm{DP}} \le 1 + \frac{BW}{C}. \]
+Compute time $T_{\mathrm{comp}} = \mathrm{FLOPs}_{\mathrm{bwd}}/C$. DP overlap holds while $T_{\mathrm{comm}} \le T_{\mathrm{comp}}$. The model dimensions cancel, leaving
+\[ \frac{N_{\mathrm{DP}}-1}{W} \le \frac{B}{C} \implies N_{\mathrm{DP}} \le 1 + \frac{BW}{C}. \]
+The takeaway: DP scales as long as you have enough work per device to hide the gradient all-reduce. Bigger global batch $B$ or faster network $W$ lets you scale to more devices; faster compute $C$ hurts because it shrinks the compute window.
 
 \question{Problem: Fully Sharded Data Parallel Calculations}
+Each device holds $1/N_{\mathrm{FSDP}}$ of the weights and processes $B/N_{\mathrm{FSDP}}$ samples; weights are gathered to full size on demand.
+
 \subquestion{(a) Forward and backward FLOPs}
+Same as DP: per-device work shrinks linearly with the device count.
 \[ \mathrm{FLOPs}_{\mathrm{fwd}} = \frac{F}{N_{\mathrm{FSDP}}}, \qquad \mathrm{FLOPs}_{\mathrm{bwd}} = \frac{2F}{N_{\mathrm{FSDP}}}. \]
 
 \subquestion{(b) Communication time}
-Forward: 3 all-gathers of $2DD_{\mathrm{FF}}$ bytes each.
+Forward: each of the 3 weights ($2DD_{\mathrm{FF}}$ bytes) gets all-gathered before its matmul:
 \[ T_{\mathrm{comm}}^{\mathrm{fwd}} = 3 \cdot \frac{N_{\mathrm{FSDP}}{-}1}{N_{\mathrm{FSDP}}} \cdot \frac{2DD_{\mathrm{FF}}}{W} = \frac{6(N_{\mathrm{FSDP}}{-}1)DD_{\mathrm{FF}}}{N_{\mathrm{FSDP}} W}. \]
-Backward: same 3 gathers + 3 reduce-scatters (twice the forward):
+Backward needs the same 3 gathers (to recompute the matmul) \emph{plus} 3 reduce-scatters to shard the gradients back, so it is exactly twice the forward:
 \[ T_{\mathrm{comm}}^{\mathrm{bwd}} = \frac{12(N_{\mathrm{FSDP}}{-}1)DD_{\mathrm{FF}}}{N_{\mathrm{FSDP}} W}. \]
 
 \subquestion{(c) Bottleneck threshold}
-Same cancellation as DP for both passes:
+The all-gather is half the cost of an all-reduce, but you do it twice (fwd + bwd) versus DP's once, so the totals match. Same cancellation as DP for both passes:
 \[ N_{\mathrm{FSDP}} \le 1 + \frac{BW}{C}. \]
+FSDP gets the same scaling threshold as DP while using $N_{\mathrm{FSDP}}\times$ less weight memory per device.
 
 \question{Problem: Tensor Parallel Calculations}
+Each device holds a $1/N_{\mathrm{TP}}$ slice of the hidden dimension $D_{\mathrm{FF}}$ and computes a partial output.
+
 \subquestion{(a) Backward equations}
-Device $i$ ($\odot$ = Hadamard):
+Device $i$ ($\odot$ = elementwise product):
 \begin{align*}
   dz^{(i)} &= dy\,(W_{3}^{(i)})^{\top}, \\
   dx_{2}^{(i)} &= dz^{(i)} \odot f(x_{1}^{(i)}), \\
@@ -453,37 +464,44 @@ Device $i$ ($\odot$ = Hadamard):
   dx_{\mathrm{loc}}^{(i)} &= dx_{1}^{(i)} (W_{1}^{(i)})^{\top} + dx_{2}^{(i)} (W_{2}^{(i)})^{\top}, \\
   dx &= \mathrm{all\text{-}reduce\text{-}sum}\bigl(\{dx_{\mathrm{loc}}^{(i)}\}\bigr).
 \end{align*}
+Each device holds the corresponding column-shards of $W_1, W_2$ and row-shard of $W_3$. Weight gradients stay local; only $dx$ needs to be summed across devices because every device contributed a partial input gradient.
 
 \subquestion{(b) Forward and backward FLOPs}
-Hidden width $D_{\mathrm{FF}}/N_{\mathrm{TP}}$ per device:
+Each device sees the full batch $B$ but only $D_{\mathrm{FF}}/N_{\mathrm{TP}}$ hidden width, so per-device matmul work shrinks by $N_{\mathrm{TP}}$:
 \[ \mathrm{FLOPs}_{\mathrm{fwd}} = \frac{F}{N_{\mathrm{TP}}}, \qquad \mathrm{FLOPs}_{\mathrm{bwd}} = \frac{2F}{N_{\mathrm{TP}}}. \]
 
 \subquestion{(c) Communication time}
-Forward: 2 activation all-gathers ($S = 2BD_{\mathrm{FF}}$) + 1 output all-reduce ($S = 2BD$):
+TP communicates activations, not weights. Forward needs 2 activation all-gathers (to broadcast $x$ before column-parallel matmuls, payload $2BD_{\mathrm{FF}}$ each) + 1 all-reduce on the row-parallel output ($2BD$):
 \[ T_{\mathrm{comm}}^{\mathrm{fwd}} = \frac{4(N_{\mathrm{TP}}{-}1)B(D+D_{\mathrm{FF}})}{N_{\mathrm{TP}} W}. \]
-Backward dominated by all-reduce on $dx$ ($S = 2BD$):
+Backward is dominated by the single all-reduce on $dx$ ($2BD$):
 \[ T_{\mathrm{comm}}^{\mathrm{bwd}} = \frac{4(N_{\mathrm{TP}}{-}1)BD}{N_{\mathrm{TP}} W}. \]
+Because traffic scales with $B$ here (unlike DP/FSDP, where it scales with the model), TP gets cheaper relative to compute when batches are small.
 
 \subquestion{(d) Bottleneck thresholds}
 Setting $T_{\mathrm{comm}} = T_{\mathrm{comp}}$ and canceling:
 \[ N_{\mathrm{TP}}^{\mathrm{fwd}} \le 1 + \frac{3DD_{\mathrm{FF}}W}{2C(D+D_{\mathrm{FF}})}, \qquad N_{\mathrm{TP}}^{\mathrm{bwd}} \le 1 + \frac{3D_{\mathrm{FF}}W}{C}. \]
+Unlike DP/FSDP, the TP threshold depends on model size ($D$, $D_{\mathrm{FF}}$) rather than batch size --- TP works best for fat MLPs.
 
 \question{Problem: 2D Parallelism Calculations}
+Combining FSDP (sharding weights across $N_{\mathrm{FSDP}}$ devices) with TP (sharding hidden dim across $N_{\mathrm{TP}}$ devices) gives an $N_{\mathrm{FSDP}} \times N_{\mathrm{TP}}$ device grid.
+
 \subquestion{(a) Forward FLOPs}
+Both axes shrink the per-device matmul:
 \[ \mathrm{FLOPs}_{\mathrm{fwd}} = \frac{F}{N_{\mathrm{FSDP}} N_{\mathrm{TP}}}. \]
 
 \subquestion{(b) Forward communication time (overlapped)}
-$T_{\mathrm{FSDP}}$: 3 weight all-gathers (each $D \cdot D_{\mathrm{FF}}/N_{\mathrm{TP}}$ FP16 elements). $T_{\mathrm{TP}}$: 1 activation all-reduce ($B/N_{\mathrm{FSDP}} \times D$). With disjoint links:
+The two collective families happen on independent device groups, so when the network can serve both simultaneously, total time is the slower of the two: $T_{\mathrm{FSDP}}$ (3 weight all-gathers, each $D \cdot D_{\mathrm{FF}}/N_{\mathrm{TP}}$ FP16 elements) vs.\ $T_{\mathrm{TP}}$ (1 activation all-reduce, $B/N_{\mathrm{FSDP}} \times D$):
 \[ T_{\mathrm{comm}}^{\mathrm{fwd}} = \max\{T_{\mathrm{FSDP}}, T_{\mathrm{TP}}\}. \]
 
 \subquestion{(c) Optimal device count (overlapped)}
-Balance $T_{\mathrm{FSDP}} = T_{\mathrm{TP}}$: ratio $N_{\mathrm{FSDP}}/N_{\mathrm{TP}} \approx 2B/(3D_{\mathrm{FF}})$. Pin to compute: $N_{\mathrm{FSDP}} \approx 1 + BW/C$, $N_{\mathrm{TP}} \approx 1 + 3D_{\mathrm{FF}}W/(2C)$:
+First balance the two axes ($T_{\mathrm{FSDP}} = T_{\mathrm{TP}}$, neither idle waiting on the other), giving the ratio $N_{\mathrm{FSDP}}/N_{\mathrm{TP}} \approx 2B/(3D_{\mathrm{FF}})$. Then push each axis to its individual compute-bound limit ($N_{\mathrm{FSDP}} \approx 1 + BW/C$, $N_{\mathrm{TP}} \approx 1 + 3D_{\mathrm{FF}}W/(2C)$):
 \[ N = N_{\mathrm{FSDP}} N_{\mathrm{TP}} \approx \frac{3BD_{\mathrm{FF}}W^{2}}{2C^{2}}. \]
+Total device count grows as $W^2/C^2$ --- doubling network bandwidth quadruples the number of useful devices.
 
 \subquestion{(d) Optimal device count (no overlap)}
-$T_{\mathrm{comm}} = T_{\mathrm{FSDP}} + T_{\mathrm{TP}}$. Optimizing the split:
+If the two collective families share network links, costs add instead of taking the max:
 \[ N \lesssim \frac{3BD_{\mathrm{FF}}W^{2}}{8C^{2}}, \]
-about $4\times$ smaller than overlapped.
+about $4\times$ smaller than the overlapped case. This is why production stacks invest heavily in disjoint collective scheduling.
 
 \section*{9 Leaderboard}
 
