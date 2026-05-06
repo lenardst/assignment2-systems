@@ -396,15 +396,11 @@ ZeRO stage~1 also shards optimizer state across data-parallel ranks with compara
 
 \question{Problem: FSDP Accounting}
 \subquestion{(a) Expected peak-memory savings}
-\texttt{FullyShardedDataParallel} shards every \texttt{cs336\_basics} \texttt{Linear} and \texttt{Embedding} weight along dimension~$0$ across $N{=}2$ ranks, while \texttt{RMSNorm} parameters stay replicated. For the course \emph{xl} \texttt{BasicsTransformerLM} ($d_{\mathrm{model}}{=}2560$, $d_{\mathrm{FF}}{=}10240$, $32$ layers, vocab $10{,}000$), the vast majority of parameters live in blocks and the LM head, with a smaller replicated contribution from norm scales.
-
-Let $P_{\mathrm{shard}}$ denote the total parameter count in sharded modules and $P_{\mathrm{repl}}$ the replicated count. A naive data-parallel replica stores $(P_{\mathrm{shard}}+P_{\mathrm{repl}})$ FP32 parameter tensors on \emph{each} GPU (ignoring optimizer state for the moment). FSDP stores $(P_{\mathrm{shard}}/N + P_{\mathrm{repl}})$ per rank, so static parameter HBM drops by approximately
+Let $P_{\mathrm{shard}}$ be the total parameter count in sharded modules and $P_{\mathrm{repl}}$ the replicated count. A naive data-parallel replica stores $(P_{\mathrm{shard}}+P_{\mathrm{repl}})$ FP32 parameter tensors on \emph{each} GPU (ignoring optimizer state for the moment). FSDP stores $(P_{\mathrm{shard}}/N + P_{\mathrm{repl}})$ per rank, so static parameter HBM drops by approximately
 \[
   \Delta_{\mathrm{stat}} \;\approx\; \Bigl(1 - \frac{1}{N}\Bigr)\,P_{\mathrm{shard}}\,s_{\mathrm{p}},
 \]
-where $s_{\mathrm{p}}{=}4$\,bytes for FP32 masters. With $N{=}2$ this is roughly half of the sharded parameter footprint per rank versus DDP.
-
-This is only a \emph{lower bound} on what matters for peak: the forward pass \texttt{all\_gather}s each weight into a full-width FP32 leaf (\texttt{\_make\_leaf\_from\_gathered}) for matmul, and the implementation prefetches the next layer while the current one computes. So transient peak includes at least one (often two) full gathered tensors in flight. At short-to-medium context, those gathers can dominate the peak story; at long context with dense attention, Table~\ref{tab:memory-peaks} and Sec.~2 already show activation storage can dominate, diluting the benefit of sharding on end-to-end peak \texttt{max\_memory\_allocated}. Qualitatively, FSDP trades repeated small static shards for layered transient gathers---helpful when weights are large relative to activations, which is the regime targeted by the assignment leaderboard.
+where $s_{\mathrm{p}}{=}4$\,bytes for FP32 masters. With $N{=}2$, this is roughly half of the sharded number of parameters for every rank versus DDP. This is only a lower bound on what matters for peak.
 
 \subquestion{(b) Weight all-gather profiling}
 Nsight timelines were captured for the \emph{xl} model wrapped in course FSDP on two GPUs, focusing on the embedding/first linear units (where the hand implementation forces synchronous \texttt{all\_gather}) versus a deeper linear later in the stack (where async prefetch can overlap).
